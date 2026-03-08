@@ -461,26 +461,40 @@ tbody td { padding:12px 14px;vertical-align:middle; }
         </div>
       </div>
 
-      <!-- SUBMISSIONS -->
+      <!-- RESULTS -->
       <div class="section">
         <div class="section-head">
-          <div class="s-icon" style="background:rgba(204,0,0,0.08)">📥</div>
-          <div><div class="s-title">Student Submissions</div><div class="s-sub">Files submitted by students after completing their exam</div></div>
+          <div class="s-icon" style="background:rgba(26,122,60,0.1)">🏆</div>
+          <div><div class="s-title">Exam Results</div><div class="s-sub">Live grades and answers submitted by students</div></div>
         </div>
         <div class="btn-row" style="margin-bottom:16px">
-          <button class="btn btn-outline btn-sm" onclick="refreshSubmissions()">🔄 Refresh</button>
-          <button class="btn btn-outline btn-sm" onclick="exportSubmissionsCSV()">📥 Export CSV</button>
+          <button class="btn btn-outline btn-sm" onclick="refreshResults()">🔄 Refresh</button>
+          <button class="btn btn-outline btn-sm" onclick="exportResultsCSV()">📥 Export CSV</button>
         </div>
-        <div id="subStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px"></div>
+        <div id="resultsStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px"></div>
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>#</th><th>Student Name</th><th>Index No.</th><th>File</th><th>Type</th><th>Submitted</th><th>Actions</th></tr>
+              <tr><th>#</th><th>Student Name</th><th>ID / Programme</th><th>Score</th><th>Grade</th><th>Time</th><th>Theory</th></tr>
             </thead>
-            <tbody id="subBody">
-              <tr class="empty-row"><td colspan="7">No submissions yet.</td></tr>
+            <tbody id="resultsBody">
+              <tr class="empty-row"><td colspan="7">No results yet. Results appear automatically when students submit.</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- THEORY MODAL -->
+      <div id="theoryModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9000;align-items:center;justify-content:center;padding:20px;">
+        <div style="background:#fff;border-radius:18px;max-width:600px;width:100%;max-height:85vh;overflow-y:auto;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--cream)">
+            <div>
+              <div style="font-family:'Playfair Display',serif;font-size:1rem" id="modalStudentName"></div>
+              <div style="font-size:0.72rem;color:var(--muted);margin-top:2px" id="modalStudentInfo"></div>
+            </div>
+            <button onclick="closeTheoryModal()" style="border:none;background:rgba(204,0,0,0.08);color:var(--red);border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:1rem">✕</button>
+          </div>
+          <div id="modalBody"></div>
         </div>
       </div>
 
@@ -756,7 +770,7 @@ if (urlToken) {
         if (snap.val()) {
           pill.className='conn-pill live'; txt.textContent='Firebase Live';
           toast('✅ Firebase connected!');
-          loadTokensFromDB(); loadSubmissionsFromDB();
+          loadTokensFromDB(); loadResultsFromDB();
         } else {
           pill.className='conn-pill'; txt.textContent='Offline';
         }
@@ -885,63 +899,97 @@ if (urlToken) {
     toast('📥 CSV downloaded');
   };
 
-  // ── SUBMISSIONS ──
-  async function loadSubmissionsFromDB() {
+  // ── RESULTS ──
+  let results = [];
+
+  async function loadResultsFromDB() {
     if(!db) return;
-    try{const snap=await get(ref(db,'submissions'));submissions=[];if(snap.exists())snap.forEach(c=>submissions.push(c.val()));renderSubmissions();}catch(e){}
+    try {
+      const snap = await get(ref(db,'results'));
+      results = [];
+      if(snap.exists()) snap.forEach(c => results.push(c.val()));
+      renderResults();
+    } catch(e) {}
   }
 
-  function renderSubmissions() {
-    const body=document.getElementById('subBody');
-    const statsEl=document.getElementById('subStats');
-    const submitted=submissions.length, total=tokens.length, pending=Math.max(0,total-submitted);
-    statsEl.innerHTML=`
-      <div style="background:rgba(37,168,90,0.08);border:1px solid rgba(37,168,90,0.2);border-radius:8px;padding:8px 14px;font-size:0.75rem;font-weight:600;color:var(--green)">✅ ${submitted} Submitted</div>
+  function renderResults() {
+    const body    = document.getElementById('resultsBody');
+    const statsEl = document.getElementById('resultsStats');
+    const total   = tokens.length;
+    const done    = results.length;
+    const pending = Math.max(0, total - done);
+
+    const gradeCount = {A:0,B:0,C:0,D:0};
+    results.forEach(r => { if(gradeCount[r.grade]!==undefined) gradeCount[r.grade]++; });
+
+    statsEl.innerHTML = `
+      <div style="background:rgba(37,168,90,0.08);border:1px solid rgba(37,168,90,0.2);border-radius:8px;padding:8px 14px;font-size:0.75rem;font-weight:600;color:var(--green)">✅ ${done} Submitted</div>
       <div style="background:rgba(255,184,0,0.08);border:1px solid rgba(255,184,0,0.2);border-radius:8px;padding:8px 14px;font-size:0.75rem;font-weight:600;color:#886600">⏳ ${pending} Pending</div>
-      <div style="background:rgba(13,13,13,0.05);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:0.75rem;font-weight:600;color:var(--muted)">👥 ${total} Total</div>`;
-    if(!submissions.length){body.innerHTML='<tr class="empty-row"><td colspan="7">No submissions yet.</td></tr>';return;}
-    const typeIcon={'application/pdf':'📄','application/msword':'📝','application/vnd.openxmlformats-officedocument.wordprocessingml.document':'📝','image/jpeg':'🖼','image/png':'🖼'};
-    body.innerHTML=submissions.map((s,i)=>{
-      const icon=typeIcon[s.fileType]||'📎';
-      const date=new Date(s.submittedAt).toLocaleString();
-      const ext=s.fileName.split('.').pop().toUpperCase();
-      return`<tr>
+      <div style="background:rgba(13,13,13,0.05);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:0.75rem;font-weight:600;color:var(--muted)">👥 ${total} Total</div>
+      <div style="background:rgba(255,184,0,0.08);border:1px solid rgba(255,184,0,0.2);border-radius:8px;padding:8px 14px;font-size:0.75rem;font-weight:600;color:#886600">A:${gradeCount.A} B:${gradeCount.B} C:${gradeCount.C} D:${gradeCount.D}</div>`;
+
+    if(!results.length) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="7">No results yet. Results appear automatically when students submit.</td></tr>';
+      return;
+    }
+
+    const gradeColor = {A:'color:var(--green);background:rgba(26,122,60,0.1)', B:'color:#1d4ed8;background:rgba(29,78,216,0.1)', C:'color:#886600;background:rgba(255,184,0,0.1)', D:'color:var(--red);background:rgba(204,0,0,0.08)'};
+
+    body.innerHTML = results.map((r,i) => {
+      const gc = gradeColor[r.grade] || gradeColor.D;
+      const date = new Date(r.submittedAt).toLocaleString();
+      const hasTheory = r.theoryAnswers && r.theoryAnswers.length > 0;
+      return `<tr>
         <td style="color:var(--muted);font-size:0.73rem">${i+1}</td>
-        <td><div class="name-cell">${s.studentName}</div></td>
-        <td><div style="font-size:0.78rem;color:var(--muted)">${s.indexNo||'—'}</div></td>
-        <td><div style="font-size:0.8rem;font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${s.fileName}">${icon} ${s.fileName}</div></td>
-        <td><span class="token-code" style="color:var(--muted)">${ext}</span></td>
-        <td style="font-size:0.73rem;color:var(--muted);white-space:nowrap">${date}</td>
-        <td><div style="display:flex;gap:6px">
-          <a class="icon-btn" href="${s.downloadUrl}" target="_blank" style="text-decoration:none" title="Download">⬇️</a>
-          <button class="icon-btn" onclick="deleteSubmission('${s.token}')" style="color:var(--red)" title="Delete">✕</button>
-        </div></td>
+        <td><div class="name-cell">${r.studentName}</div><div style="font-size:0.7rem;color:var(--muted)">${date}</div></td>
+        <td><div style="font-size:0.78rem;font-weight:500">${r.studentId||'—'}</div><div style="font-size:0.7rem;color:var(--muted)">${r.studentProg||''}</div></td>
+        <td>
+          <div style="font-weight:700;font-size:0.88rem">${r.score}</div>
+          <div style="font-size:0.7rem;color:var(--muted)">${r.percentage}%</div>
+        </td>
+        <td><span style="display:inline-block;padding:4px 12px;border-radius:20px;font-weight:800;font-size:0.85rem;${gc}">${r.grade}</span></td>
+        <td style="font-size:0.78rem;color:var(--muted)">${r.timeUsed||'—'}</td>
+        <td>
+          ${hasTheory
+            ? `<button class="btn btn-outline btn-sm" onclick="viewTheory('${r.token}')">📝 View</button>`
+            : '<span style="font-size:0.72rem;color:var(--muted)">—</span>'}
+        </td>
       </tr>`;
     }).join('');
   }
 
-  window.refreshSubmissions = async function() {
+  window.viewTheory = function(token) {
+    const r = results.find(x => x.token === token);
+    if(!r || !r.theoryAnswers) return;
+    document.getElementById('modalStudentName').textContent = r.studentName;
+    document.getElementById('modalStudentInfo').textContent = r.studentId + ' · ' + r.studentProg + ' · Grade ' + r.grade + ' · ' + r.score + ' (' + r.percentage + '%)';
+    document.getElementById('modalBody').innerHTML = r.theoryAnswers.map((t,i) => `
+      <div style="margin-bottom:18px;padding:14px;background:var(--cream);border-radius:10px;border:1px solid var(--border)">
+        <div style="font-size:0.7rem;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Theory Q${i+1} · ${t.marks} marks</div>
+        <div style="font-size:0.84rem;font-weight:600;margin-bottom:8px">${t.question}</div>
+        <div style="font-size:0.82rem;color:#333;line-height:1.7;background:#fff;padding:10px 14px;border-radius:8px;border:1px solid var(--border)">${t.answer||'<em style="color:var(--muted)">No answer provided</em>'}</div>
+      </div>`).join('');
+    document.getElementById('theoryModal').style.display = 'flex';
+  };
+
+  window.closeTheoryModal = function() {
+    document.getElementById('theoryModal').style.display = 'none';
+  };
+
+  window.refreshResults = async function() {
     if(!db){toast('Connect Firebase first',true);return;}
-    await loadSubmissionsFromDB(); toast('🔄 Submissions refreshed');
+    await loadResultsFromDB(); toast('🔄 Results refreshed');
   };
 
-  window.deleteSubmission = async function(token) {
-    if(!confirm('Delete this submission? Cannot be undone.')) return;
-    const sub=submissions.find(s=>s.token===token); if(!sub) return;
-    try{
-      if(storage&&sub.storagePath) await deleteObject(sRef(storage,sub.storagePath));
-      await remove(ref(db,'submissions/'+token));
-      submissions=submissions.filter(s=>s.token!==token);
-      renderSubmissions(); toast('Submission deleted');
-    }catch(e){toast('Delete failed: '+e.message,true);}
-  };
-
-  window.exportSubmissionsCSV = function() {
-    const rows=[['#','Student Name','Index No.','File Name','File Type','Submitted At','Download URL']];
-    submissions.forEach((s,i)=>rows.push([i+1,s.studentName,s.indexNo||'',s.fileName,s.fileType,new Date(s.submittedAt).toLocaleString(),s.downloadUrl||'']));
-    const csv=rows.map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
-    const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);a.download='hp-submissions-'+new Date().toISOString().slice(0,10)+'.csv';a.click();
-    toast('📥 Submissions CSV downloaded');
+  window.exportResultsCSV = function() {
+    const rows = [['#','Student Name','Student ID','Programme','Score','Percentage','Grade','Time Used','Submitted At']];
+    results.forEach((r,i) => rows.push([i+1, r.studentName, r.studentId||'', r.studentProg||'', r.score, r.percentage+'%', r.grade, r.timeUsed||'', new Date(r.submittedAt).toLocaleString()]));
+    const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
+    a.download = 'hp-results-' + new Date().toISOString().slice(0,10) + '.csv';
+    a.click();
+    toast('📥 Results CSV downloaded');
   };
 }
 
